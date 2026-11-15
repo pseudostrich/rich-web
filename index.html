@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="rich-build" content="202611160525">
+<meta name="rich-build" content="202611160534">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#151515">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3169,6 +3169,24 @@ requestAnimationFrame(() => {
   if (location.hash === '#add') openQuickAdd();
 });
 addEventListener('hashchange', () => { if (location.hash==='#add') openQuickAdd(); });
+/* expenses added from the Action Button / Siri / Shortcuts wait in the app's inbox until Rich opens */
+async function pullInbox(){
+  if (!NATIVE) return;
+  let items; try { items = await nat('inbox'); } catch(e){ return; }
+  if (!Array.isArray(items) || !items.length) return;
+  const s0 = snap(); let n = 0;
+  for (const it of items){
+    if (!it || real.expenses.some(e => e.id === it.id) || !(+it.c > 0) || !parseISO(it.date)) continue;
+    const want = String(it.cat || '').toLowerCase();
+    const cat = real.categories.find(c => c.name.toLowerCase() === want) || real.categories.find(c => c.id === want) || real.categories.find(c => c.id === 'other') || real.categories[0];
+    real.expenses.push({id: String(it.id), date: it.date, cat: cat.id, c: Math.round(+it.c), at: +it.at || Date.now(), src: 'shortcut'}); n++;
+  }
+  if (!n) return;
+  persist(); refresh({flash: n === 1 ? real.expenses[real.expenses.length-1].cat : undefined});
+  toast(`Added ${n} expense${n>1?'s':''} from Shortcuts`, s0);
+}
+setTimeout(pullInbox, 600);
+addEventListener('visibilitychange', () => { if (!document.hidden) pullInbox(); });
 if (load.repaired) setTimeout(() => toast(`Moved ${load.repaired} receipt item${load.repaired>1?'s':''} back to the day you scanned ${load.repaired>1?'them':'it'}`), 900);
 /* tell the iPhone app this page started fine (it falls back to the built-in page otherwise) */
 if (NATIVE) nat('ready').then(r => { if (r && typeof r === 'object') appInfo = r; }).catch(() => {});
