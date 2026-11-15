@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="rich-build" content="202611160502">
+<meta name="rich-build" content="202611160520">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#151515">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1185,6 +1185,17 @@ const cap1 = t => t ? t.charAt(0).toLocaleUpperCase() + t.slice(1) : t;
 let real = load();
 Object.assign(real.settings, {capV: real.settings.capV||1, catsV: real.settings.catsV||1, myBillsV: Math.max(real.settings.myBillsV||0, 2), subsV: Math.max(real.settings.subsV||0, 2), papaV: Math.max(real.settings.papaV||0, 8)});
 if (load.seeded) try { localStorage.setItem(KEY, JSON.stringify(real)); } catch(e){}
+/* repair: receipts saved under a misread date (e.g. the wrong year) go back to the day they were scanned */
+(function(){
+  let fixed = 0;
+  for (const e of real.expenses || []){
+    if (e.src !== 'scan' || !e.at) continue;
+    const day = new Date(e.at).toLocaleDateString('en-CA', {timeZone:'Asia/Manila'});
+    const gap = (Date.parse(day) - Date.parse(e.date)) / 864e5;
+    if (!(gap >= 0 && gap <= 60)) { e.date = day; fixed++; }
+  }
+  if (fixed) try { real.updatedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(real)); load.repaired = fixed; } catch(e){}
+})();
 let demoDB = null;
 function load(){
   try { const s = localStorage.getItem(KEY); if (s){ const d = JSON.parse(s); if (d && d.v===1){ d.bills ||= []; d.paid ||= {}; if (!d.papa){ d.papa = papaSeed(); load.seeded = true; } return d; } } } catch(e){}
@@ -2998,6 +3009,10 @@ function shrink(file, max = 1600){ return new Promise((res, rej) => { const img 
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); c.toBlob(b => b ? res(b) : rej(), 'image/jpeg', .85); URL.revokeObjectURL(img.src); };
   img.onerror = rej; img.src = URL.createObjectURL(file); }); }
 const toC = v => { const n = typeof v === 'number' ? v : parseFloat(String(v||'').replace(/[^\d.\-]/g,'')); return isFinite(n) ? Math.round(n*100) : 0; };
+function plausibleScanDate(iso){
+  const gap = (Date.parse(todayISO()) - Date.parse(iso)) / 864e5;
+  return gap >= 0 && gap <= 60;
+}
 function setScDate(v){ scDate.value = v; document.getElementById('sc-datelbl').textContent = dateLabel(v); }
 document.getElementById('qa-scan').addEventListener('change', async e => {
   const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -3030,7 +3045,8 @@ Return JSON only: {"store": string|null, "date": "YYYY-MM-DD"|null, "items": [{"
     if (!out || out.readable === false || !Array.isArray(out.items)) throw {code:'unreadable'};
     scan = {store: out.store || 'Receipt', items: out.items.map(it => ({name: cap1(String(it.name||'Item')), c: toC(it.amount), cat: mem[String(it.name||'').toLowerCase()] || ((cats.some(c=>c.id===it.category) && it.category !== 'other') ? it.category : (guessCat(it.name, cats) || 'other')), unsure: !!it.unsure, orig: it.category})),
             discount: Math.abs(toC(out.discount)), total: toC(out.total)};
-    if (out.date && parseISO(out.date)) setScDate(out.date);
+    // Only trust a printed date that's recent (last 60 days, not in the future); OCR often misreads the year.
+    if (out.date && parseISO(out.date) && plausibleScanDate(out.date)) setScDate(out.date);
     renderScan();
   } catch(err){
     const c = err && err.code;
@@ -3143,6 +3159,7 @@ requestAnimationFrame(() => {
   if (location.hash === '#add') openQuickAdd();
 });
 addEventListener('hashchange', () => { if (location.hash==='#add') openQuickAdd(); });
+if (load.repaired) setTimeout(() => toast(`Moved ${load.repaired} receipt item${load.repaired>1?'s':''} back to the day you scanned ${load.repaired>1?'them':'it'}`), 900);
 /* tell the iPhone app this page started fine (it falls back to the built-in page otherwise) */
 if (NATIVE) nat('ready').catch(() => {});
 })();
