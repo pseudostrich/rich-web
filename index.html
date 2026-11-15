@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="rich-build" content="202611160534">
+<meta name="rich-build" content="202611160539">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#151515">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3185,6 +3185,7 @@ async function pullInbox(){
   persist(); refresh({flash: n === 1 ? real.expenses[real.expenses.length-1].cat : undefined});
   toast(`Added ${n} expense${n>1?'s':''} from Shortcuts`, s0);
 }
+window.richPullInbox = pullInbox;   // the app's own Quick Add calls this after saving
 setTimeout(pullInbox, 600);
 addEventListener('visibilitychange', () => { if (!document.hidden) pullInbox(); });
 if (load.repaired) setTimeout(() => toast(`Moved ${load.repaired} receipt item${load.repaired>1?'s':''} back to the day you scanned ${load.repaired>1?'them':'it'}`), 900);
