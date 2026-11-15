@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="rich-build" content="202611160443">
+<meta name="rich-build" content="202611160502">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#151515">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3010,8 +3010,13 @@ document.getElementById('qa-scan').addEventListener('change', async e => {
     let out;
     if (NATIVE){ // on-device: Apple text recognition + Apple's on-device model, nothing leaves the phone
       const img = await shrink(f, 2400);
-      out = await nat('scan', {image: await blobB64(img), categories: cats.map(c => ({id:c.id, name:c.name})), memory: mem});
+      // The small model answers best with plain names plus examples, so it's given "Food (groceries, meals…)"
+      // and asked to answer "Food"; the answer is matched back to Rich's category here.
+      const memNames = {}; for (const [k, v] of Object.entries(mem)) memNames[k] = (cats.find(c => c.id === v) || {}).name || v;
+      out = await nat('scan', {image: await blobB64(img), memory: memNames,
+        categories: cats.map(c => ({id: c.name, name: CAT_HINTS[c.id] ? `${c.name} (${CAT_HINTS[c.id]})` : c.name}))});
       if (out && out.error) throw {code: out.error};
+      if (out && Array.isArray(out.items)) out.items.forEach(it => { it.category = catFromAnswer(it.category, cats); });
     } else {
     const sample = await claude.use('sample'); if (!sample) throw {code:'not_granted'};
     const img = await shrink(f);
@@ -3023,7 +3028,7 @@ Return JSON only: {"store": string|null, "date": "YYYY-MM-DD"|null, "items": [{"
     out = await sample.json(prompt, {images:[img], modelTier:'default'});
     }
     if (!out || out.readable === false || !Array.isArray(out.items)) throw {code:'unreadable'};
-    scan = {store: out.store || 'Receipt', items: out.items.map(it => ({name: cap1(String(it.name||'Item')), c: toC(it.amount), cat: mem[String(it.name||'').toLowerCase()] || (cats.some(c=>c.id===it.category) ? it.category : 'other'), unsure: !!it.unsure, orig: it.category})),
+    scan = {store: out.store || 'Receipt', items: out.items.map(it => ({name: cap1(String(it.name||'Item')), c: toC(it.amount), cat: mem[String(it.name||'').toLowerCase()] || ((cats.some(c=>c.id===it.category) && it.category !== 'other') ? it.category : (guessCat(it.name, cats) || 'other')), unsure: !!it.unsure, orig: it.category})),
             discount: Math.abs(toC(out.discount)), total: toC(out.total)};
     if (out.date && parseISO(out.date)) setScDate(out.date);
     renderScan();
@@ -3033,6 +3038,39 @@ Return JSON only: {"store": string|null, "date": "YYYY-MM-DD"|null, "items": [{"
     document.getElementById('sc-store').textContent = 'Receipt';
   }
 });
+/* ---- receipt categories: examples for the model, matching its answer, and a keyword safety net ---- */
+const CAT_HINTS = {
+  food:'groceries, rice, meat, fish, eggs, bread, snacks, drinks, coffee, meals, restaurants, fast food',
+  transport:'jeep, bus, train, taxi, Grab, fare, parking, toll',
+  gas:'fuel, gasoline, diesel, petrol',
+  laundry:'laundry service, detergent, fabric softener, dry cleaning',
+  care:'shampoo, soap, toothpaste, lotion, deodorant, medicine, vitamins, toiletries, haircut',
+  school:'books, notebooks, pens, paper, printing, photocopy, school supplies, tuition',
+  gym:'gym fees, protein, supplements, sports gear',
+  clothes:'shirts, pants, shorts, shoes, socks, underwear, apparel',
+  shopping:'gadgets, home and kitchen items, gifts, accessories'
+};
+const CAT_WORDS = {
+  food:/\b(rice|bigas|chicken|manok|pork|baboy|beef|fish|isda|egg|itlog|bread|tinapay|milk|gatas|noodle|pancit|canton|sardin|tuna|corned|hotdog|ham|bacon|cheese|butter|sugar|asukal|salt|asin|oil|mantika|soy|toyo|vinegar|suka|sauce|ketchup|mayo|coffee|kape|tea|juice|soda|coke|sprite|royal|water|tubig|beer|snack|chips|biscuit|cookie|candy|choco|cake|pizza|burger|fries|meal|rice ?meal|siopao|siomai|fruit|banana|saging|apple|mango|vegetable|gulay|onion|sibuyas|garlic|bawang|tomato|kamatis|potato|cereal|oat|yogurt|ice ?cream|grocer)/i,
+  care:/\b(shampoo|conditioner|soap|sabon|safeguard|dove|toothpaste|colgate|toothbrush|lotion|deodorant|rexona|tissue|napkin|pad|diaper|alcohol|sanitizer|vitamin|medicine|gamot|biogesic|neozep|tablet|capsule|razor|cotton|facial|cleanser|sunscreen|haircut)/i,
+  laundry:/\b(detergent|surf|ariel|tide|breeze|downy|fabcon|fabric ?con|zonrox|bleach|laundry)/i,
+  gas:/\b(gasoline|diesel|unleaded|premium 9|fuel|petron|shell|caltex|seaoil)/i,
+  school:/\b(notebook|pen|pencil|paper|bond|folder|book|print|photocopy|xerox|highlighter|eraser|ruler|scotch|tape)/i,
+  clothes:/\b(shirt|tee|pants|jeans|shorts|dress|skirt|shoe|sneaker|slipper|sock|brief|boxer|underwear|jacket|hoodie)/i,
+  transport:/\b(fare|parking|toll|grab|angkas|joyride|taxi|bus|jeep|lrt|mrt|beep)/i
+};
+function catFromAnswer(ans, cats){
+  const s = String(ans || '').toLowerCase().replace(/\(.*$/, '').trim();
+  if (!s) return 'other';
+  const c = cats.find(c => c.name.toLowerCase() === s) || cats.find(c => c.id === s)
+         || cats.find(c => s.startsWith(c.name.toLowerCase()) || c.name.toLowerCase().startsWith(s));
+  return c ? c.id : 'other';
+}
+function guessCat(name, cats){
+  const n = String(name || '');
+  for (const [id, re] of Object.entries(CAT_WORDS)) if (re.test(n) && cats.some(c => c.id === id)) return id;
+  return null;
+}
 function renderScan(){
   if (!scan) return; const cats = DB().categories;
   document.getElementById('sc-store').textContent = scan.store;
